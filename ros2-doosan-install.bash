@@ -5,7 +5,7 @@ sudo sed -i "s|$(grep -o 'deb [^ ]*ubuntu/' /etc/apt/sources.list |
 grep -m 1 -v security |
 sed 's|deb ||g')|http://kr.archive.ubuntu.com/ubuntu/|g" /etc/apt/sources.list
 
-### Delete old packages
+### Delete docker packages
 for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker \
 containerd runc; do sudo apt-get purge -y $pkg; done
 
@@ -34,20 +34,13 @@ docker-buildx-plugin docker-compose-plugin
 ### Add user to docker group
 sudo usermod -aG docker $USER
 
-### Change terminal group to docker if running in script
-if [ ! -t 0 ]; then
-    group=docker
-    if [ $(id -gn) != $group ]; then
-    exec sg $group "$0 $*"
-    fi
-fi
-
 ### Install ROS2 humble desktop
 ### REF: https://github.com/Tiryoh/ros2_setup_scripts_ubuntu
 CHOOSE_ROS_DISTRO=humble
 INSTALL_PACKAGE=desktop
 TARGET_OS=jammy
 
+### prevent update error on Hyper-V
 sudo apt-get update && sudo apt install -y $(sudo apt list --upgradable | 
 grep -v Listing... | cut -d "/" -f 1 | grep -v xrdp)
 
@@ -56,12 +49,16 @@ sudo apt-get install -y software-properties-common
 sudo add-apt-repository -y universe
 sudo apt-get install -y curl gnupg2 lsb-release build-essential
 
+
+### Add ROS key:
 sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
 -o /usr/share/keyrings/ros-archive-keyring.gpg
 echo "deb [arch=$(dpkg --print-architecture) \
 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
 http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" | \
 sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+### Install ROS2
 sudo apt-get update
 sudo apt-get install -y ros-$CHOOSE_ROS_DISTRO-$INSTALL_PACKAGE
 sudo apt-get install -y python3-argcomplete python3-colcon-clean
@@ -99,7 +96,7 @@ sudo apt-get install -y libignition-gazebo6-dev ros-humble-gazebo-ros-pkgs \
 ros-humble-moveit-msgs ros-humble-ros-gz-sim ros-humble-ros-gz
 sudo apt-get autoremove -y
 
-### Doosan ROS2 Packages Installation
+### Doosan ROS2 Packages Installation on Path ~/ros2_ws/src
 mkdir -p ~/ros2_ws/src
 cd ~/ros2_ws/src
 
@@ -116,16 +113,25 @@ sudo ./install_emulator.sh
 grep -F 'export PYTHONPATH=$PYTHONPATH:~/ros2_ws/install/dsr_common2/lib/dsr_common2/imp' ~/.bashrc ||
 echo 'export PYTHONPATH=$PYTHONPATH:~/ros2_ws/install/dsr_common2/lib/dsr_common2/imp' >> ~/.bashrc
 
-### Add the installation prefix of "ament_cmake"
-source /opt/ros/humble/setup.bash
+### Remove Doosan robot and [ignition]gazebo packages directory to prevent build error
+rm -rf ~/ros2_ws/build/dsr_* ~/ros2_ws/build/gz_* ~/ros2_ws/build/ign_*
+rm -rf ~/ros2_ws/install/dsr_* ~/ros2_ws/install/gz_* ~/ros2_ws/install/ign_*
+
 ### Build Doosan ROS2 Packages
 cd ~/ros2_ws
 colcon build
-. ~/ros2_ws/install/setup.bash
+source ~/ros2_ws/install/setup.bash
 
 ### Use software rendering if WSL
 uname -r | grep -qi "Microsoft" &&
 grep -F "export LIBGL_ALWAYS_SOFTWARE=1" ~/.bashrc ||
 echo "export LIBGL_ALWAYS_SOFTWARE=1" >> ~/.bashrc
 
-newgrp docker
+### Set User Group  to docker until next boot
+touch /tmp/booted
+echo "[ \$(id -gn) != docker ] && newgrp docker" >> ~/.bashrc
+echo "if [ ! -f /tmp/booted ]; then \
+touch /tmp/booted; sed -i '/[ \$(id -gn) != docker ] && newgrp docker/d' ~/.bashrc; \
+sed -i '\$d' ~/.bashrc; elif [ \$(id -gn) != docker ]; then \
+newgrp docker; fi" >> ~/.bashrc
+[ $(id -gn) != docker ] && newgrp docker
